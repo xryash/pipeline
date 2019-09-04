@@ -5,8 +5,7 @@ import logging
 
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 from kafka import KafkaProducer
-
-
+from multiprocessing import Queue
 
 def setup_custom_logger(filename):
     """Set configuration for logging"""
@@ -41,7 +40,6 @@ KAFKA_SERVERS = ['localhost:9092']
 
 def worker_func(vacancy_id):
     """Thread function for doing requests to API"""
-
     url = VACANCY_QUERY_PATTERN % vacancy_id
     try:
         # do request and decode body
@@ -49,27 +47,17 @@ def worker_func(vacancy_id):
         content = response.content.decode('utf-8')
 
         return {'status_code': response.status_code, 'id': vacancy_id, 'content': content}
+
     except:
         # if there is an error, return 0 as a status_code and id of vacancy
         LOGGER.error('An error occurred on id {}'.format(vacancy_id))
         return {'status_code': 0, 'id': vacancy_id}
 
 
-def start_jobs(start, offset, worker_func, workers_number=6):
-    """Start workers with specified range of indexes"""
-    with ThreadPoolExecutor(max_workers=workers_number) as executor:
-        # do requests asynchronously
-        futures = [executor.submit(worker_func, i) for i in range(start, offset)]
-
-        # wait for all threads to finish executing for specified timeout
-        done, not_done = wait(futures, timeout=WAIT_SLEEP_TIME, return_when=ALL_COMPLETED)
-
-    return done, not_done
-
-
-def handle_error_data(error_data):
+def handle_error_data(error_data, queue):
     """Handle data that was returned with an error"""
-    pass
+    for item in error_data:
+        queue.put(int(item['id']))
 
 
 def send_to_kafka(correct_data):
@@ -97,7 +85,6 @@ def send_to_kafka(correct_data):
     LOGGER.info(
         'Messages sent to Kafka: {}, messages not sent: {}, Kafka topic: {}'.format(len(sent), len(not_sent),
                                                                                     KAFKA_TOPIC_NAME))
-
 
 
 def handle_not_done_requests(not_done_futures):
@@ -128,7 +115,7 @@ def sort_done_requests(done_requests):
     return correct_data, incorrect_data, error_data
 
 
-def handler_func(done, not_done):
+def handler_func(done, not_done, queue):
     """Thread handler function"""
 
     LOGGER.info('Done requests: {}, Not done requests {}'.format(len(done), len(not_done)))
@@ -145,28 +132,51 @@ def handler_func(done, not_done):
     # send correct data to kafka cluster
     send_to_kafka(correct_data)
 
-    handle_error_data(error_data)
+    handle_error_data(error_data, queue)
 
 
-def run(offset, start=0, step=50):
-    iterations = (offset - start) // step
+def start_jobs(ids, worker_func, workers_number=6):
+    """Start workers with specified range of indexes"""
+    with ThreadPoolExecutor(max_workers=workers_number) as executor:
+        # do requests asynchronously
+        futures = [executor.submit(worker_func, i) for i in ids]
+
+        # wait for all threads to finish executing with specified timeout
+        done, not_done = wait(futures, timeout=WAIT_SLEEP_TIME, return_when=ALL_COMPLETED)
+
+    return done, not_done
+
+
+
+if __name__ == "__main__":
+
+    start, offset = 100000, 105000
+
+    step = 50
+
+    queue = Queue()
+
     current = start
 
-    for i in range(iterations):
-        LOGGER.info('Range {} to {}'.format(current, current + step))
-        done_futures, not_done_futures = start_jobs(current, current + step, worker_func=worker_func, workers_number=10)
+    while current < offset:
+        # check queue size and if it is bigger or equal to a step, use values from queue
+        LOGGER.info('{} elements are waiting to be downloaded'.format(queue.qsize()))
+        if queue.qsize() > step:
+            LOGGER.info('Downloading elements from queue...')
 
-        futures_handler = threading.Thread(target=handler_func, args=(done_futures, not_done_futures))
+            # take N elements from queue
+            ids = [queue.get() for _ in range(step)]
 
+        else:
+            LOGGER.info('Downloading elements from range {} to {}...'.format(current, current + step))
+
+            ids = range(current, current + step)
+            current += step
+
+        # start jobs
+        done_futures, not_done_futures = start_jobs(ids, worker_func=worker_func, workers_number=10)
+
+        # start handler for workers results
+        futures_handler = threading.Thread(target=handler_func, args=(done_futures, not_done_futures, queue))
         futures_handler.start()
-
-        current += step
-
-
-start, offset = 100000, 105000
-
-step = 50
-
-run(offset, start, step)
-
 
