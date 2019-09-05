@@ -1,11 +1,11 @@
 import requests
 import json
-import threading
 import logging
 
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 from kafka import KafkaProducer
-from multiprocessing import Queue
+import multiprocessing as mp
+
 
 def setup_custom_logger(filename):
     """Set configuration for logging"""
@@ -67,7 +67,7 @@ def send_to_kafka(correct_data):
     kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_SERVERS,
                                    value_serializer=lambda x: json.dumps(x).encode('utf-8'))
 
-    sent, not_sent = [], []
+    sent = 0
 
     for elem in correct_data:
         try:
@@ -75,15 +75,14 @@ def send_to_kafka(correct_data):
             message = elem['content']
             future = kafka_producer.send(KAFKA_TOPIC_NAME, message)
             future.get(timeout=5)
-            sent.append(elem['id'])
+            sent += 1
         except:
             LOGGER.error('An error occurred on id {}'.format(elem['id']))
-            not_sent.append(elem['id'])
 
     # finally flush data
     kafka_producer.flush()
     LOGGER.info(
-        'Messages sent to Kafka: {}, messages not sent: {}, Kafka topic: {}'.format(len(sent), len(not_sent),
+        ' {}/{} messages have been sent to Kafka, Kafka topic: {}'.format(sent, len(correct_data),
                                                                                     KAFKA_TOPIC_NAME))
 
 
@@ -154,8 +153,7 @@ if __name__ == "__main__":
 
     step = 50
 
-    queue = Queue()
-
+    queue = mp.Queue()
     current = start
 
     while current < offset:
@@ -177,6 +175,6 @@ if __name__ == "__main__":
         done_futures, not_done_futures = start_jobs(ids, worker_func=worker_func, workers_number=10)
 
         # start handler for workers results
-        futures_handler = threading.Thread(target=handler_func, args=(done_futures, not_done_futures, queue))
+        futures_handler = mp.Process(target=handler_func, args=(done_futures, not_done_futures, queue))
         futures_handler.start()
 
