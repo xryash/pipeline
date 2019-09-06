@@ -1,0 +1,68 @@
+version: '2'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    hostname: zookeeper
+    ports:
+    - "2181:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+  kafka-1:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka-1
+    ports:
+      - "19092:19092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:19092
+  kafka-2:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka-2
+    ports:
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092
+  spark_job:
+    build:
+      context: ./spark_job
+    command: bin/spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1,\org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 spark_job.py
+    environment:
+      MONGODB_URI: mongodb://localhost:27017/
+      MONGODB_DATABASE: hh-mongo
+      MONGODB_COLLECTION: raw_vacancies
+      SPARK_STREAMING_DELAY: 15
+      KAFKA_TOPIC: raw_vacancies
+      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
+      SPARK_LOGS: spark_job.log
+      PYTHONUNBUFFERED: 1
+    depends_on:
+    - zookeeper
+    - kafka-1
+    - kafka-2
+  connector:
+    build:
+      context: ./connector
+    command: python3 connector.py 0 3000 50
+    environment:
+      REQUESTS_TIMEOUT: 60
+      REQUESTS_URL_PATTERN: https://api.hh.ru/vacancies/%s
+      CONNECTOR_LOGS: connector.log
+      KAFKA_TOPIC: raw_vacancies
+      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
+      PYTHONUNBUFFERED: 1
+    depends_on:
+    - zookeeper
+    - kafka-1
+    - kafka-2
+    - spark_job
