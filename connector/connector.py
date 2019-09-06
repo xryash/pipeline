@@ -1,6 +1,8 @@
 import requests
 import json
 import logging
+import os
+import sys
 
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 from kafka import KafkaProducer
@@ -27,20 +29,9 @@ def setup_custom_logger(filename):
     return logger
 
 
-WAIT_SLEEP_TIME = 60
-VACANCY_QUERY_PATTERN = 'https://api.hh.ru/vacancies/%s'
-
-LOG_FILE_PATH = 'logs/log1.log'
-
-LOGGER = setup_custom_logger(LOG_FILE_PATH)
-
-KAFKA_TOPIC_NAME = 'raw-vacancies'
-KAFKA_SERVERS = ['localhost:9092']
-
-
 def worker_func(vacancy_id):
     """Thread function for doing requests to API"""
-    url = VACANCY_QUERY_PATTERN % vacancy_id
+    url = REQUESTS_URL_PATTERN % vacancy_id
     try:
         # do request and decode body
         response = requests.get(url)
@@ -64,7 +55,7 @@ def send_to_kafka(correct_data):
     """Handle correct data from futures and send it to Kafka"""
 
     # init kafka producer
-    kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_SERVERS,
+    kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_BROKERS,
                                    value_serializer=lambda x: json.dumps(x).encode('utf-8'))
 
     sent = 0
@@ -73,7 +64,7 @@ def send_to_kafka(correct_data):
         try:
             # try to send data to kafka
             message = elem['content']
-            future = kafka_producer.send(KAFKA_TOPIC_NAME, message)
+            future = kafka_producer.send(KAFKA_TOPIC, message)
             future.get(timeout=5)
             sent += 1
         except:
@@ -83,7 +74,7 @@ def send_to_kafka(correct_data):
     kafka_producer.flush()
     LOGGER.info(
         ' {}/{} messages have been sent to Kafka, Kafka topic: {}'.format(sent, len(correct_data),
-                                                                                    KAFKA_TOPIC_NAME))
+                                                                          KAFKA_TOPIC))
 
 
 def handle_not_done_requests(not_done_futures):
@@ -141,7 +132,7 @@ def start_jobs(ids, worker_func, workers_number=6):
         futures = [executor.submit(worker_func, i) for i in ids]
 
         # wait for all threads to finish executing with specified timeout
-        done, not_done = wait(futures, timeout=WAIT_SLEEP_TIME, return_when=ALL_COMPLETED)
+        done, not_done = wait(futures, timeout=REQUESTS_TIMEOUT, return_when=ALL_COMPLETED)
 
     return done, not_done
 
@@ -149,27 +140,44 @@ def start_jobs(ids, worker_func, workers_number=6):
 
 if __name__ == "__main__":
 
-    start, offset = 100000, 105000
+    START_ID = int(sys.argv[1])
 
-    step = 50
+    FINISH_ID = int(sys.argv[2])
+
+    STEP = int(sys.argv[3])
+
+    REQUESTS_TIMEOUT = int(os.environ.get('REQUESTS_TIMEOUT'))
+
+    REQUESTS_URL_PATTERN = os.environ.get('REQUESTS_URL_PATTERN')
+
+    CONNECTOR_LOGS = os.environ.get('CONNECTOR_LOGS')
+
+
+
+    KAFKA_TOPIC = os.environ.get('KAFKA_TOPIC')
+    KAFKA_BROKERS = os.environ.get('KAFKA_BROKERS').split(' ')
+    print(KAFKA_BROKERS)
 
     queue = mp.Queue()
-    current = start
 
-    while current < offset:
+    current = START_ID
+
+    LOGGER = setup_custom_logger(CONNECTOR_LOGS)
+
+    while current < FINISH_ID:
         # check queue size and if it is bigger or equal to a step, use values from queue
         LOGGER.info('{} elements are waiting to be downloaded'.format(queue.qsize()))
-        if queue.qsize() > step:
+        if queue.qsize() > STEP:
             LOGGER.info('Downloading elements from queue...')
 
             # take N elements from queue
-            ids = [queue.get() for _ in range(step)]
+            ids = [queue.get() for _ in range(STEP)]
 
         else:
-            LOGGER.info('Downloading elements from range {} to {}...'.format(current, current + step))
+            LOGGER.info('Downloading elements from range {} to {}...'.format(current, current + STEP))
 
-            ids = range(current, current + step)
-            current += step
+            ids = range(current, current + STEP)
+            current += STEP
 
         # start jobs
         done_futures, not_done_futures = start_jobs(ids, worker_func=worker_func, workers_number=10)
@@ -177,4 +185,5 @@ if __name__ == "__main__":
         # start handler for workers results
         futures_handler = mp.Process(target=handler_func, args=(done_futures, not_done_futures, queue))
         futures_handler.start()
+
 
