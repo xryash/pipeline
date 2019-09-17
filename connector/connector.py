@@ -2,6 +2,7 @@ import requests
 import json
 import logging
 import os
+import time
 import sys
 
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
@@ -137,34 +138,51 @@ def start_jobs(ids, worker_func, workers_number=6):
     return done, not_done
 
 
+def wait_for_kafka_connection(delay=5):
+    """Try to connect to kafka with the given delay"""
+    while True:
+        try:
+            kafka = KafkaProducer(bootstrap_servers=KAFKA_BROKERS)
+            LOGGER.info('Connection to kafka cluster established')
+            kafka.close()
+            break
+        except:
+            LOGGER.error('Can not connect to kafka cluster')
+            time.sleep(delay)
+
+
 
 if __name__ == "__main__":
-
-    START_ID = int(sys.argv[1])
-
-    FINISH_ID = int(sys.argv[2])
-
-    STEP = int(sys.argv[3])
-
+    # start and sto values for range of ids
+    START_ID = int(os.environ.get('START_ID'))
+    STOP_ID = int(os.environ.get('STOP_ID'))
+    # value defines the number of requests for each iteration
+    STEP = int(os.environ.get('STEP'))
+    # timeout for function waits for completion of all requests
     REQUESTS_TIMEOUT = int(os.environ.get('REQUESTS_TIMEOUT'))
-
+    # pattern url that is used for doing requests to api
     REQUESTS_URL_PATTERN = os.environ.get('REQUESTS_URL_PATTERN')
-
+    # path to logs
     CONNECTOR_LOGS = os.environ.get('CONNECTOR_LOGS')
-
-
-
+    # delay to job
+    START_DOWNLOADING_AFTER = int(os.environ.get('START_DOWNLOADING_AFTER'))
+    # kafka data
     KAFKA_TOPIC = os.environ.get('KAFKA_TOPIC')
     KAFKA_BROKERS = os.environ.get('KAFKA_BROKERS').split(' ')
-    print(KAFKA_BROKERS)
 
+    # init queue for not successful requests
     queue = mp.Queue()
 
     current = START_ID
 
     LOGGER = setup_custom_logger(CONNECTOR_LOGS)
 
-    while current < FINISH_ID:
+    # wait for connection to kafka cluster
+    wait_for_kafka_connection()
+
+    time.sleep(START_DOWNLOADING_AFTER)
+
+    while current < STOP_ID:
         # check queue size and if it is bigger or equal to a step, use values from queue
         LOGGER.info('{} elements are waiting to be downloaded'.format(queue.qsize()))
         if queue.qsize() > STEP:
