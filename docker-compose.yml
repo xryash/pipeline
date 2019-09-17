@@ -9,7 +9,7 @@ services:
       ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_INIT_LIMIT: 10
       ZOOKEEPER_SYNC_LIMIT: 2
   kafka-1:
     image: confluentinc/cp-kafka:latest
@@ -38,7 +38,7 @@ services:
       context: ./spark_job
     command: bin/spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1,\org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 spark_job.py
     environment:
-      MONGODB_URI: mongodb://localhost:27017/
+      MONGODB_URI: mongodb://172.17.0.1:27017
       MONGODB_DATABASE: hh-mongo
       MONGODB_COLLECTION: raw_vacancies
       SPARK_STREAMING_DELAY: 15
@@ -50,10 +50,10 @@ services:
     - zookeeper
     - kafka-1
     - kafka-2
-  connector:
+  connector-1:
     build:
       context: ./connector
-    command: python3 connector.py 0 3000 50
+    command: python3 connector.py
     environment:
       REQUESTS_TIMEOUT: 60
       REQUESTS_URL_PATTERN: https://api.hh.ru/vacancies/%s
@@ -61,6 +61,30 @@ services:
       KAFKA_TOPIC: raw_vacancies
       KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
       PYTHONUNBUFFERED: 1
+      START_DOWNLOADING_AFTER: 30
+      START_ID: 0
+      STOP_ID: 500000
+      STEP: 50
+    depends_on:
+    - zookeeper
+    - kafka-1
+    - kafka-2
+    - spark_job
+  connector-2:
+    build:
+      context: ./connector
+    command: python3 connector.py
+    environment:
+      REQUESTS_TIMEOUT: 60
+      REQUESTS_URL_PATTERN: https://api.hh.ru/vacancies/%s
+      CONNECTOR_LOGS: connector.log
+      KAFKA_TOPIC: raw_vacancies
+      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
+      PYTHONUNBUFFERED: 1
+      START_DOWNLOADING_AFTER: 30
+      START_ID: 500000
+      STOP_ID: 1000000
+      STEP: 50
     depends_on:
     - zookeeper
     - kafka-1
