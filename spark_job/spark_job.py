@@ -54,7 +54,6 @@ if __name__ == "__main__":
         .config("spark.mongodb.output.uri", MONGODB_URI) \
         .config("spark.mongodb.output.database", MONGODB_DATABASE) \
         .config("spark.mongodb.output.collection", MONGODB_COLLECTION) \
-        .config("ark.mongodb.output.partitionerOptions.partitionKey", "id") \
         .getOrCreate()
 
     LOGGER.info('Spark session started')
@@ -89,9 +88,10 @@ if __name__ == "__main__":
             try:
                 LOGGER.info('Saving messages to database...')
                 df.write.format("mongo").mode("append").save()
-                LOGGER.INFO("Saving messages to database completed successfully")
+                LOGGER.info("Saving messages to database completed successfully")
             except Exception as err:
                 LOGGER.error('Error saving messages to database')
+                LOGGER.error(err)
 
 
     if messages.count() is not 0:
