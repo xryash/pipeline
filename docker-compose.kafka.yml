@@ -12,7 +12,6 @@ services:
       ZOOKEEPER_INIT_LIMIT: 10
       ZOOKEEPER_SYNC_LIMIT: 2
 
-
   kafka-1:
     image: confluentinc/cp-kafka:latest
     hostname: kafka-1
@@ -24,7 +23,6 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:19092
-
 
   kafka-2:
     image: confluentinc/cp-kafka:latest
@@ -39,59 +37,3 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092
 
 
-  spark_job:
-    build:
-      context: ./spark_job
-    command: Эbin/spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1,\org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 spark_job.py
-    environment:
-      MONGODB_URI: mongodb://172.17.0.1:27017
-      MONGODB_DATABASE: hh-mongo
-      MONGODB_COLLECTION: raw_vacancies
-      SPARK_STREAMING_DELAY: 15
-      KAFKA_TOPIC: raw_vacancies
-      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
-      PYTHONUNBUFFERED: 1
-    depends_on:
-    - zookeeper
-    - kafka-1
-    - kafka-2
-  connector-1:
-    build:
-      context: ./connector
-    command: python3 connector.py
-    environment:
-      REQUESTS_TIMEOUT: 60
-      REQUESTS_URL_PATTERN: https://api.hh.ru/vacancies/%s
-      CONNECTOR_LOGS: connector.log
-      KAFKA_TOPIC: raw_vacancies
-      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
-      PYTHONUNBUFFERED: 1
-      START_DOWNLOADING_AFTER: 30
-      START_ID: 0
-      STOP_ID: 500000
-      STEP: 50
-    depends_on:
-    - zookeeper
-    - kafka-1
-    - kafka-2
-    - spark_job
-  connector-2:
-    build:
-      context: ./connector
-    command: python3 connector.py
-    environment:
-      REQUESTS_TIMEOUT: 60
-      REQUESTS_URL_PATTERN: https://api.hh.ru/vacancies/%s
-      CONNECTOR_LOGS: connector.log
-      KAFKA_TOPIC: raw_vacancies
-      KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
-      PYTHONUNBUFFERED: 1
-      START_DOWNLOADING_AFTER: 30
-      START_ID: 500000
-      STOP_ID: 1000000
-      STEP: 50
-    depends_on:
-    - zookeeper
-    - kafka-1
-    - kafka-2
-    - spark_job
