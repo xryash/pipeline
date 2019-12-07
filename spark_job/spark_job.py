@@ -6,6 +6,8 @@ from pyspark.sql.types import IntegerType
 import json
 import logging
 import os
+import time
+from kafka import KafkaProducer
 
 
 def setup_custom_logger(filename):
@@ -27,18 +29,28 @@ def setup_custom_logger(filename):
 
     return logger
 
+def wait_for_kafka_connection(delay=5):
+    """Try to connect to kafka with the given delay"""
+    while True:
+        try:
+            kafka = KafkaProducer(bootstrap_servers=KAFKA_BROKERS)
+            LOGGER.info('Connection to kafka cluster established')
+            kafka.close()
+            break
+        except:
+            LOGGER.error('Can not connect to kafka cluster')
+            time.sleep(delay)
+
 
 if __name__ == "__main__":
 
-    KAFKA_BROKERS = os.environ.get('KAFKA_BROKERS')
+    KAFKA_BROKERS = os.environ.get('KAFKA_BROKERS').split()
 
     KAFKA_TOPIC = os.environ.get('KAFKA_TOPIC')
 
     SPARK_STREAMING_DELAY = os.environ.get('SPARK_STREAMING_DELAY')
 
     MONGODB_URI = os.environ.get('MONGODB_URI')
-    MONGODB_DATABASE = os.environ.get('MONGODB_DATABASE')
-    MONGODB_COLLECTION = os.environ.get('MONGODB_COLLECTION')
 
     SPARK_LOGS = os.environ.get('SPARK_LOGS')
 
@@ -52,8 +64,6 @@ if __name__ == "__main__":
         .builder \
         .appName("BigDataAnalyzer") \
         .config("spark.mongodb.output.uri", MONGODB_URI) \
-        .config("spark.mongodb.output.database", MONGODB_DATABASE) \
-        .config("spark.mongodb.output.collection", MONGODB_COLLECTION) \
         .getOrCreate()
 
     LOGGER.info('Spark session started')
@@ -66,10 +76,14 @@ if __name__ == "__main__":
 
     LOGGER.info('Creating direct stream to kafka cluster......')
 
+
+    # wait for connection to kafka cluster
+    wait_for_kafka_connection()
+
     # create direct stream to kafka cluster
     kafka_stream = KafkaUtils.createDirectStream(streaming_sc, [KAFKA_TOPIC],
                                                  {"metadata.broker.list": (
-                                                     ','.join(str(x) for x in KAFKA_BROKERS.split()))})
+                                                     ','.join(str(x) for x in KAFKA_BROKERS))})
 
     LOGGER.info('Direct stream to kafka cluster created')
 
@@ -82,7 +96,6 @@ if __name__ == "__main__":
         """Handle spark rdd data and save it to database"""
         if not rdd.isEmpty():
             df = spark.read.json(sc.parallelize([json.loads(row) for row in rdd.collect()]))
-            # df = df.select(col)'id'].cast(IntegerType())
             df = df.withColumn('id', df.id.cast(IntegerType()))
 
             try:
@@ -101,3 +114,4 @@ if __name__ == "__main__":
     # start listening
     streaming_sc.start()
     streaming_sc.awaitTermination()
+
