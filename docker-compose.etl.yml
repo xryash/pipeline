@@ -1,9 +1,9 @@
 version: '2'
 services:
-  spark_job:
-    build:
-      context: ./spark_job
-    command: bin/spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1,\org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 spark_job.py
+  spark-job:
+    image: igoreshadockeroid/hh-spark:latest
+    hostname: spark-job
+    command: spark/bin/spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1,\org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 spark_job.py
     environment:
       MONGODB_URI: mongodb://${MONGODB_CREDENTIALS}@${MONGODB_NODES}/${MONGODB_DATABASE}.{$MONGODB_COLLECTION}?${MONGODB_ARGS}
       SPARK_STREAMING_DELAY: 20
@@ -12,9 +12,9 @@ services:
       KAFKA_BROKERS: kafka-1:19092 kafka-2:29092
       PYTHONUNBUFFERED: 1
 
-  connector-1:
-    build:
-      context: ./connector
+  connector:
+    image: igoreshadockeroid/hh-connector:latest
+    hostname: connector
     command: python3 connector.py
     environment:
       REQUESTS_TIMEOUT: 60
